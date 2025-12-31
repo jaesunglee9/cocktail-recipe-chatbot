@@ -12,76 +12,85 @@ from langchain_core.output_parsers import StrOutputParser
 # 환경변수 로드
 load_dotenv(override=True)
 
-# 페이지 설정
+# ========== Page ==========
 st.set_page_config(
-    page_title="칵테일 추천 챗봇",
+    page_title="🍹 Cocktail Master",
     page_icon="🍹",
     layout="centered",
 )
 
-# ---------- UI 스타일 ----------
-st.markdown(
-    """
+# ========== Global Style ==========
+st.markdown("""
 <style>
-/* 전체 폭 살짝 좁게 보이게(가운데 정렬 느낌 강화) */
-.block-container { padding-top: 2.2rem; padding-bottom: 2.5rem; max-width: 860px; }
+.block-container { padding-top: 2rem; max-width: 860px; }
+h1 { margin-bottom: 0.3rem; }
+.small-muted { color: rgba(250,250,250,0.75); font-size: 0.95rem; }
 
-/* 타이틀/서브타이틀 간격 */
-h1 { margin-bottom: 0.2rem; }
-.small-muted { color: rgba(250,250,250,0.75); font-size: 0.95rem; margin-top: 0.2rem; }
-
-/* 카드 느낌 박스 */
-.card {
+/* chat bubble */
+div[data-testid="stChatMessage"] { background: transparent !important; }
+div[data-testid="stChatMessageContent"] {
+  border-radius: 18px !important;
+  padding: 0.9rem 1rem !important;
   border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+  line-height: 1.55;
+}
+div[data-testid="stChatInput"] > div {
   border-radius: 16px;
-  padding: 14px 16px;
-  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.12);
 }
 
-/* 사이드바 버튼 조금 넓게 */
-.sidebar-btn button { width: 100%; border-radius: 12px; }
-
-/* 채팅 입력 상단 여백 */
-div[data-testid="stChatInput"] { margin-top: 1rem; }
+/* background vibe */
+.stApp {
+  background:
+    radial-gradient(900px 600px at 15% 10%, rgba(59,130,246,0.10), transparent 60%),
+    radial-gradient(800px 600px at 85% 15%, rgba(236,72,153,0.08), transparent 55%);
+}
 </style>
-""",
-    unsafe_allow_html=True
-)
+""", unsafe_allow_html=True)
 
-# ---------- Vector / RAG ----------
+# ========== Splash Screen ==========
+if "started" not in st.session_state:
+    st.session_state.started = False
+
+if not st.session_state.started:
+    st.markdown("""
+    <div style="text-align:center; padding: 30px;">
+      <div style="font-size:42px;">🍸</div>
+      <div style="font-size:24px; font-weight:700;">Cocktail Master</div>
+      <div class="small-muted" style="margin: 12px 0 20px;">
+        오늘은 뭐 마실래? 이름이나 재료로 물어봐 😎
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if st.button("🚪 바 입장하기", use_container_width=True):
+        st.session_state.started = True
+        st.rerun()
+    st.stop()
+
+# ========== Retriever ==========
 @st.cache_resource
 def initialize_retriever(filepath="./iba-cocktails-web.csv"):
     if not os.path.exists(filepath):
-        st.error(f"CSV 파일을 찾을 수 없습니다: {filepath}")
+        st.error("CSV 파일이 없습니다.")
         return None
 
-    # Chroma persistence 디렉토리 존재 여부로 로드/생성
     persist_dir = "./cocktail.db"
     if os.path.exists(persist_dir):
-        vectorstore = Chroma(
-            persist_directory=persist_dir,
-            embedding_function=OpenAIEmbeddings(model="text-embedding-3-small"),
-        )
-        return vectorstore.as_retriever(search_kwargs={"k": 3})
+        vs = Chroma(persist_directory=persist_dir,
+                    embedding_function=OpenAIEmbeddings(model="text-embedding-3-small"))
+        return vs.as_retriever(search_kwargs={"k": 10})
 
     loader = CSVLoader(filepath, encoding="utf-8")
     docs = loader.load()
-
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
     chunks = splitter.split_documents(docs)
 
-    vectorstore = Chroma.from_documents(
-        chunks,
+    vs = Chroma.from_documents(chunks,
         embedding=OpenAIEmbeddings(model="text-embedding-3-small"),
-        persist_directory=persist_dir,
-    )
-
-    st.toast(f"✅ {len(chunks)}개 청크 임베딩 완료", icon="🍸")
-    return vectorstore.as_retriever(
-        search_type="mmr",
-        search_kwargs={"k": 10, "fetch_k": 30, "lambda_mult": 0.6}
-    )
-
+        persist_directory=persist_dir)
+    return vs.as_retriever(search_kwargs={"k": 10})
 
 @st.cache_resource
 def create_rag_chain():
@@ -107,6 +116,7 @@ def create_rag_chain():
 - 쓸데없는 멘트 적극 환영
   (예: “이거 마시면 왜 다들 멋있는 척하는지 알아?”)
 - 가벼운 농담, 허세, 바텐더식 경고 멘트 자주 사용
+- 재료는 한국어로 얘기하는 게 좋겠고 칵테일 이름은 영어로 해도 상관없어 
 - 🍸😉🥃 이모지는 가끔만
 
 [검색 규칙]
@@ -269,44 +279,38 @@ st.markdown(
 
 chain = create_rag_chain()
 
-# ---------- Sidebar ----------
+# ========== Session ==========
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# ========== Sidebar ==========
 with st.sidebar:
     st.header("⚙️ 설정")
-
-    st.markdown('<div class="sidebar-btn">', unsafe_allow_html=True)
-    if st.button("🧹 대화 초기화"):
+    if st.button("🧹 대화 초기화", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("---")
-
-
-# ---------- Chat History ----------
+# ========== Chat History ==========
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
+    avatar = "😵‍💫" if msg["role"] == "user" else "🕴️"
+    with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
 
-# ---------- Chat Input ----------
+# ========== Chat Input ==========
 if user_input := st.chat_input("칵테일에 대해 물어보세요..."):
     st.session_state.messages.append({"role": "user", "content": user_input})
-    with st.chat_message("user"):
+    with st.chat_message("user", avatar="😵‍💫"):
         st.markdown(user_input)
 
-    with st.chat_message("assistant"):
+    with st.chat_message("assistant", avatar="🕴️"):
         if chain is None:
-            response = "⚠️ 시스템 초기화에 실패했어요. CSV 경로/환경변수(OPENAI_API_KEY) 확인해줘!"
+            response = "시스템 준비가 안 됐어요 😵"
             st.markdown(response)
         else:
-            with st.spinner("어이, 잠시만 기다리라구~!"):
-                try:
-                    def stream_generator():
-                        for chunk in chain.stream(user_input):
-                            yield chunk
-            
-                    response = st.write_stream(stream_generator())
-                except Exception as e:
-                    response = f"오류: {e}"
-                    st.markdown(response)
+            with st.spinner("어이, 조금만 기다리라구 ~🍸"):
+                def gen():
+                    for c in chain.stream(user_input):
+                        yield c
+                response = st.write_stream(gen())
 
     st.session_state.messages.append({"role": "assistant", "content": response})
