@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 from dotenv import load_dotenv
+
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.document_loaders import CSVLoader
@@ -16,58 +17,333 @@ load_dotenv(override=True)
 st.set_page_config(
     page_title="🍹 Cocktail Master",
     page_icon="🍹",
-    layout="centered",
+    layout="wide",
 )
 
 # ========== Global Style ==========
-st.markdown("""
+st.markdown(r"""
 <style>
-.block-container { padding-top: 2rem; max-width: 860px; }
-h1 { margin-bottom: 0.3rem; }
-.small-muted { color: rgba(250,250,250,0.75); font-size: 0.95rem; }
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
 
-/* chat bubble */
-div[data-testid="stChatMessage"] { background: transparent !important; }
-div[data-testid="stChatMessageContent"] {
-  border-radius: 18px !important;
-  padding: 0.9rem 1rem !important;
-  border: 1px solid rgba(255,255,255,0.12);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
-  line-height: 1.55;
+* { font-family: 'Noto Sans KR', sans-serif !important; }
+
+/* 전체 배경 - 바 느낌 */
+.stApp {
+  background: linear-gradient(180deg,
+    rgba(20, 20, 30, 0.95) 0%,
+    rgba(40, 30, 20, 0.95) 100%),
+    url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800"><rect fill="%23140a05" width="1200" height="800"/><rect fill="%231a0f0a" y="400" width="1200" height="400"/></svg>');
+  background-size: cover;
+  background-attachment: fixed;
+}
+
+.block-container {
+  padding: 0 !important;
+  max-width: 100% !important;
+}
+
+/* 헤더 */
+.bar-header {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  padding: 15px 30px;
+  background: rgba(20, 20, 30, 0.95);
+  border-bottom: 2px solid rgba(139, 90, 43, 0.5);
+  z-index: 200;
+  text-align: center;
+  backdrop-filter: blur(10px);
+}
+.bar-title {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #f4d03f;
+  text-shadow: 0 0 20px rgba(244, 208, 63, 0.5),
+               0 0 40px rgba(244, 208, 63, 0.3);
+  margin: 0;
+  letter-spacing: 2px;
+}
+.bar-subtitle {
+  color: rgba(244, 208, 63, 0.7);
+  font-size: 0.9rem;
+  margin-top: 5px;
+}
+
+/* 바 카운터 */
+.bar-counter {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: 200px;
+  background: linear-gradient(180deg,
+    rgba(101, 67, 33, 0.9) 0%,
+    rgba(139, 90, 43, 1) 40%,
+    rgba(101, 67, 33, 1) 100%);
+  border-top: 8px solid rgba(139, 90, 43, 0.8);
+  box-shadow: 0 -10px 50px rgba(0,0,0,0.8),
+              inset 0 5px 20px rgba(255,255,255,0.1);
+  z-index: 100;
+}
+.bar-counter::before {
+  content: '';
+  position: absolute;
+  top: -8px; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255,215,0,0.3) 20%,
+    rgba(255,215,0,0.5) 50%,
+    rgba(255,215,0,0.3) 80%,
+    transparent 100%);
+}
+
+/* 바 장식 */
+.bar-glasses {
+  position: absolute;
+  bottom: 10px;
+  left: 5%;
+  font-size: 2rem;
+  opacity: 0.6;
+  animation: float 3s ease-in-out infinite;
+}
+.bar-glasses-right {
+  left: auto;
+  right: 5%;
+  animation-delay: 1.5s;
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+/* 채팅 영역 (✅ 입력창 위까지만) */
+.chat-area {
+  position: fixed;
+  top: 80px;
+  bottom: 320px;                 /* ✅ 입력창+바카운터 안전거리 */
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90%;
+  max-width: 1000px;
+
+  overflow-y: auto;
+  padding: 20px 20px 160px 20px; /* ✅ 아래 여유 */
+  z-index: 90;                   /* 바(100) 아래, 입력창(150) 아래 */
+}
+
+/* 스크롤바 */
+.chat-area::-webkit-scrollbar { width: 8px; }
+.chat-area::-webkit-scrollbar-track {
+  background: rgba(0,0,0,0.2);
+  border-radius: 10px;
+}
+.chat-area::-webkit-scrollbar-thumb {
+  background: rgba(139, 90, 43, 0.6);
+  border-radius: 10px;
+}
+
+/* 말풍선 공통 */
+.speech-bubble {
+  position: relative;
+  max-width: 540px;
+  padding: 18px 22px;
+  margin: 22px auto;
+  border-radius: 20px;
+  line-height: 1.6;
+  font-size: 0.95rem;
+  animation: fadeIn 0.25s ease-in;
+  word-break: break-word;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 손님 말풍선 */
+.user-bubble {
+  background: #667eea;
+  color: white;
+  margin-left: auto;
+  margin-right: 80px;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+.user-bubble::after {
+  content: '';
+  position: absolute;
+  right: -20px;
+  top: 20px;
+  width: 0; height: 0;
+  border: 15px solid transparent;
+  border-left-color: #667eea;
+  border-right: 0;
+}
+.user-avatar {
+  position: absolute;
+  right: -55px;
+  top: 10px;
+  font-size: 2.5rem;
+  filter: drop-shadow(0 4px 8px rgba(0,0,0,0.3));
+}
+
+/* 바텐더 말풍선 */
+.bartender-bubble {
+  background: #2d2d2d;
+  color: #f4f4f4;
+  border: 2px solid rgba(244, 208, 63, 0.5);
+  margin-left: 80px;
+  margin-right: auto;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+}
+.bartender-bubble::before {
+  content: '';
+  position: absolute;
+  left: -20px;
+  top: 20px;
+  width: 0; height: 0;
+  border: 15px solid transparent;
+  border-right-color: #2d2d2d;
+  border-left: 0;
+}
+.bartender-avatar {
+  position: absolute;
+  left: -55px;
+  top: 10px;
+  font-size: 2.5rem;
+  filter: drop-shadow(0 4px 8px rgba(0,0,0,0.3));
+}
+
+/* 입력창 */
+div[data-testid="stChatInput"] {
+  position: fixed !important;
+  bottom: 220px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  width: 90% !important;
+  max-width: 700px !important;
+  z-index: 150 !important;
+
+  background: rgba(255, 255, 255, 0.95) !important;
+  border: 2px solid rgba(244, 208, 63, 0.6) !important;
+  border-radius: 30px !important;
+  padding: 8px 15px !important;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.7),
+              0 0 20px rgba(244, 208, 63, 0.2) !important;
+  backdrop-filter: blur(10px) !important;
 }
 div[data-testid="stChatInput"] > div {
-  border-radius: 16px;
-  border: 1px solid rgba(255,255,255,0.12);
+  background: transparent !important;
+  border: none !important;
+}
+div[data-testid="stChatInput"] textarea {
+  background: transparent !important;
+  color: #000000 !important;
+  font-size: 1rem !important;
+  padding: 12px 20px !important;
+  border: none !important;
+  font-weight: 500 !important;
+}
+div[data-testid="stChatInput"] textarea::placeholder {
+  color: rgba(0, 0, 0, 0.5) !important;
+  font-weight: 500 !important;
+}
+div[data-testid="stChatInput"] button { color: #667eea !important; }
+
+/* 예시 질문 카드 */
+.example-questions {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto 30px auto;
+  background: rgba(244, 208, 63, 0.1);
+  border: 2px solid rgba(244, 208, 63, 0.3);
+  border-radius: 20px;
+  padding: 20px 30px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+}
+.example-title {
+  color: #f4d03f;
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin-bottom: 15px;
+  text-align: center;
+  text-shadow: 0 0 10px rgba(244, 208, 63, 0.5);
+}
+.example-item {
+  background: rgba(255, 255, 255, 0.05);
+  color: #f4f4f4;
+  padding: 12px 18px;
+  margin: 8px 0;
+  border-radius: 12px;
+  border-left: 4px solid #f4d03f;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 0.95rem;
+}
+.example-item:hover {
+  background: rgba(244, 208, 63, 0.2);
+  transform: translateX(5px);
+  border-left-color: #fff;
 }
 
-/* background vibe */
-.stApp {
-  background:
-    radial-gradient(900px 600px at 15% 10%, rgba(59,130,246,0.10), transparent 60%),
-    radial-gradient(800px 600px at 85% 15%, rgba(236,72,153,0.08), transparent 55%);
+/* 쉐이커 */
+.shaker-container {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 300;
+  text-align: center;
 }
+.shaker {
+  font-size: 100px;
+  animation: shake 0.5s infinite;
+  filter: drop-shadow(0 10px 20px rgba(244, 208, 63, 0.5));
+}
+@keyframes shake {
+  0%, 100% { transform: rotate(-15deg) translateY(0); }
+  25%      { transform: rotate(15deg) translateY(-10px); }
+  50%      { transform: rotate(-15deg) translateY(0); }
+  75%      { transform: rotate(15deg) translateY(-10px); }
+}
+.shaker-text {
+  margin-top: 20px;
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #f4d03f;
+  text-shadow: 0 0 20px rgba(244, 208, 63, 0.8),
+               0 0 40px rgba(244, 208, 63, 0.5);
+  animation: pulse 1s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.8; transform: scale(1.05); }
+}
+
+/* 초기화 버튼 */
+.reset-btn {
+  position: fixed;
+  top: 15px;
+  right: 20px;
+  z-index: 250;
+}
+.reset-btn button {
+  background: rgba(244, 208, 63, 0.2) !important;
+  color: #f4d03f !important;
+  border: 2px solid rgba(244, 208, 63, 0.4) !important;
+  border-radius: 10px !important;
+  padding: 8px 20px !important;
+  font-weight: 600 !important;
+  transition: all 0.3s !important;
+}
+.reset-btn button:hover {
+  background: rgba(244, 208, 63, 0.3) !important;
+  transform: scale(1.05) !important;
+}
+
+/* 사이드바 숨기기 */
+section[data-testid="stSidebar"] { display: none; }
+
+/* Streamlit 기본 요소 숨기기 */
+#MainMenu, footer, header { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
-
-# ========== Splash Screen ==========
-if "started" not in st.session_state:
-    st.session_state.started = False
-
-if not st.session_state.started:
-    st.markdown("""
-    <div style="text-align:center; padding: 30px;">
-      <div style="font-size:42px;">🍸</div>
-      <div style="font-size:24px; font-weight:700;">Cocktail Master</div>
-      <div class="small-muted" style="margin: 12px 0 20px;">
-        오늘은 뭐 마실래? 이름이나 재료로 물어봐 😎
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    if st.button("🚪 바 입장하기", use_container_width=True):
-        st.session_state.started = True
-        st.rerun()
-    st.stop()
 
 # ========== Retriever ==========
 @st.cache_resource
@@ -78,19 +354,25 @@ def initialize_retriever(filepath="./iba-cocktails-web.csv"):
 
     persist_dir = "./cocktail.db"
     if os.path.exists(persist_dir):
-        vs = Chroma(persist_directory=persist_dir,
-                    embedding_function=OpenAIEmbeddings(model="text-embedding-3-small"))
+        vs = Chroma(
+            persist_directory=persist_dir,
+            embedding_function=OpenAIEmbeddings(model="text-embedding-3-small"),
+        )
         return vs.as_retriever(search_kwargs={"k": 10})
 
     loader = CSVLoader(filepath, encoding="utf-8")
     docs = loader.load()
+
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
     chunks = splitter.split_documents(docs)
 
-    vs = Chroma.from_documents(chunks,
+    vs = Chroma.from_documents(
+        chunks,
         embedding=OpenAIEmbeddings(model="text-embedding-3-small"),
-        persist_directory=persist_dir)
-    return vs.as_retriever(search_kwargs={"k": 10})
+        persist_directory=persist_dir,
+    )
+    return vs.as_retriever(search_kwargs={"k": 5})
+
 
 @st.cache_resource
 def create_rag_chain():
@@ -239,78 +521,116 @@ White Lady
 
 [답변]
 """
-
-
     prompt = ChatPromptTemplate.from_template(template)
-
     llm = ChatOpenAI(
         temperature=0.1,
         model_name="gpt-5-nano-2025-08-07",
         streaming=True
     )
 
-    chain = (
+    return (
         {"context": retriever, "question": RunnablePassthrough()}
         | prompt
         | llm
         | StrOutputParser()
     )
-    return chain
-
-
-# ---------- Session State ----------
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-# ---------- Header ----------
-st.title("🍹 칵테일 마스터 ")
-st.markdown('<div class="small-muted">CSV 기반 RAG로 칵테일 정보를 찾아서 답해줘요.</div>', unsafe_allow_html=True)
-st.markdown(
-    """
-<div class="card">
-<b>예시 질문</b><br/>
-• "모히또 재료랑 만드는 법 알려줘"<br/>
-• "마티니 어떻게 만들어?"<br/>
-• "이런 재료 있는데 어떤 칵테일 만들 수 있을까?"
-</div>
-""",
-    unsafe_allow_html=True
-)
-
-chain = create_rag_chain()
 
 # ========== Session ==========
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# ========== Sidebar ==========
-with st.sidebar:
-    st.header("⚙️ 설정")
-    if st.button("🧹 대화 초기화", use_container_width=True):
+# ========== Header ==========
+st.markdown("""
+<div class="bar-header">
+    <div class="bar-title">🍹 Cocktail Master Bar 🍹</div>
+    <div class="bar-subtitle">어서오세요, 무슨 칵테일 드릴까요?</div>
+</div>
+""", unsafe_allow_html=True)
+
+# ========== 초기화 버튼 ==========
+col1, col2, col3 = st.columns([8, 1, 1])
+with col3:
+    st.markdown('<div class="reset-btn">', unsafe_allow_html=True)
+    if st.button("🔄 새로 시작"):
         st.session_state.messages = []
         st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# ========== Chat History ==========
-for msg in st.session_state.messages:
-    avatar = "😵‍💫" if msg["role"] == "user" else "🕴️"
-    with st.chat_message(msg["role"], avatar=avatar):
-        st.markdown(msg["content"])
-
-# ========== Chat Input ==========
-if user_input := st.chat_input("칵테일에 대해 물어보세요..."):
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    with st.chat_message("user", avatar="😵‍💫"):
-        st.markdown(user_input)
-
-    with st.chat_message("assistant", avatar="🕴️"):
-        if chain is None:
-            response = "시스템 준비가 안 됐어요 😵"
-            st.markdown(response)
+# ========== Chat Area ==========
+chat_container = st.container()
+with chat_container:
+    st.markdown('<div class="chat-area">', unsafe_allow_html=True)
+    
+    # 예시 질문 (대화 시작 전에만 표시)
+    if len(st.session_state.messages) == 0:
+        st.markdown("""
+        <div class="example-questions">
+            <div class="example-title">💬 이렇게 물어보세요!</div>
+            <div class="example-item">🍸 "모히또 재료랑 만드는 법 알려줘"</div>
+            <div class="example-item">🥃 "마티니 어떻게 만들어?"</div>
+            <div class="example-item">🍹 "위스키로 만드는 칵테일 추천해줘"</div>
+            <div class="example-item">🍋 "새콤한 칵테일 뭐 있어?"</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    for msg in st.session_state.messages:
+        if msg["role"] == "user":
+            st.markdown(f"""
+            <div style="display: flex; justify-content: center; margin: 20px 0;">
+                <div class="speech-bubble user-bubble">
+                    <div class="user-avatar">😵‍💫</div>
+                    {msg["content"]}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
         else:
-            with st.spinner("어이, 조금만 기다리라구 ~🍸"):
-                def gen():
-                    for c in chain.stream(user_input):
-                        yield c
-                response = st.write_stream(gen())
+            st.markdown(f"""
+            <div style="display: flex; justify-content: center; margin: 20px 0;">
+                <div class="speech-bubble bartender-bubble">
+                    <div class="bartender-avatar">🕴️</div>
+                    {msg["content"]}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
+# ========== Bar Counter ==========
+st.markdown("""
+<div class="bar-counter">
+    <div class="bar-glasses">🍸 🥃 🍷</div>
+    <div class="bar-glasses bar-glasses-right">🍹 🥂 🍾</div>
+</div>
+""", unsafe_allow_html=True)
+
+# ========== Input Area ==========
+chain = create_rag_chain()
+
+# 입력창을 가장 아래에 배치
+if user_input := st.chat_input("칵테일에 대해 물어보세요... 🍸"):
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    
+    if chain is None:
+        response = "죄송해요, 지금 시스템 점검 중이에요 😅"
+    else:
+        # 쉐이커 애니메이션 표시
+        shaker_placeholder = st.empty()
+        shaker_placeholder.markdown("""
+        <div class="shaker-container">
+            <div class="shaker">🍸</div>
+            <div class="shaker-text">칵테일 만드는 중...</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        try:
+            response = ""
+            for chunk in chain.stream(user_input):
+                response += chunk
+        except Exception as e:
+            response = f"앗, 실수로 잔을 깨뜨렸네요... 😵 ({str(e)})"
+        finally:
+            # 애니메이션 제거
+            shaker_placeholder.empty()
+    
     st.session_state.messages.append({"role": "assistant", "content": response})
+    st.rerun()
