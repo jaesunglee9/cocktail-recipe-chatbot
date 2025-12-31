@@ -298,11 +298,15 @@ if user_input := st.chat_input("칵테일에 대해 물어보세요..."):
             response = "⚠️ 시스템 초기화에 실패했어요. CSV 경로/환경변수(OPENAI_API_KEY) 확인해줘!"
             st.markdown(response)
         else:
-            with st.spinner("어이, 잠시만 기다리라구 🕴!"):
+            with st.spinner("어이, 잠시만 기다리라구~!"):
                 try:
-                    response = chain.invoke(user_input)
+                    def stream_generator():
+                        for chunk in chain.stream(user_input):
+                            yield chunk
+            
+                    response = st.write_stream(stream_generator())
                 except Exception as e:
                     response = f"오류: {e}"
-            st.markdown(response)
+                    st.markdown(response)
 
     st.session_state.messages.append({"role": "assistant", "content": response})
